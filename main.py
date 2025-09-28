@@ -174,3 +174,54 @@ async def predict_logistic_background(data: IrisData, background_tasks: Backgrou
         "prediction": prediction,
         "message": "Prediction is processed, logging in background"
     }
+###############################################
+from fastapi import Depends
+from auth import verify_api_key
+
+@app.post("/secure/predict", dependencies=[Depends(verify_api_key)])
+async def secure_predict(data: IrisData, model_choice: ModelChoice):
+    model = app.state.models.get(model_choice.model_name)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    features = [[
+        data.sepal_length,
+        data.sepal_width,
+        data.petal_length,
+        data.petal_width
+    ]]
+    prediction = model.predict(features).tolist()
+
+    return {
+        "model": model_choice.model_name,
+        "prediction": prediction
+    }
+###############################################
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import os
+
+WHITELIST = ["/health", "/docs", "/openapi.json"]
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    # Vérifier si l'endpoint est dans la whitelist
+    if request.url.path not in WHITELIST:
+        api_key = request.headers.get("X-API-Key")
+        if api_key != os.getenv("API_KEY"):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    # Continuer le traitement normal si tout est ok
+    return await call_next(request)
+#################################################
+import time
+from fastapi.responses import JSONResponse
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    print(f"Request {request.url.path} processed in {process_time:.4f}s")
+    return response
